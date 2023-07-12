@@ -24,8 +24,10 @@ pip install -r requirements.txt
 
 Update the config.py file with your specific configuration settings.
 
-Place your smart contract ABI file in the contracts directory.
-
+Place the following in the relevant variables:
+1. ABI JSON file path.
+2. The corresponding Smart Contract address.
+   
 Start the API server:
 
 ```
