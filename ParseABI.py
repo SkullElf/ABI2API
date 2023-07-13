@@ -2,7 +2,7 @@ import base64
 import aiohttp
 from multiversx_sdk_core import Address
 
-from config import PROXY_URL
+from config import PROXY_URL, SIZE_PER_TYPE
 
 
 def int_to_hex(number):
@@ -13,7 +13,7 @@ def int_to_hex(number):
 def convert_args(args):
     args_output = []
     for arg in args:
-        if arg["type"] in ["u64", "u32", "u8"]:
+        if arg["type"] in list(SIZE_PER_TYPE.keys()):
             args_output.append(int_to_hex(arg["value"]))
         elif arg["type"] == "Address":
             args_output.append(Address.from_bech32(arg["value"]).hex())
@@ -54,20 +54,14 @@ def read_hex(data, object_type, types):
         return None, 0
     parsed_data = {}
     offset = 0
-    if object_type in ["BigUint", "u64", "Address", "bool", "TokenIdentifier", "EgldOrEsdtTokenIdentifier", "u32", "u8"]:
+    if object_type in (["BigUint", "Address", "bool", "TokenIdentifier", "EgldOrEsdtTokenIdentifier"]) + list(SIZE_PER_TYPE.keys()):
         result = None
-        if object_type == "bool":
+        if object_type in list(SIZE_PER_TYPE.keys()):
+            result = int.from_bytes(data[offset:offset + SIZE_PER_TYPE.get(object_type)], byteorder="big")
+            offset += SIZE_PER_TYPE.get(object_type)
+        elif object_type == "bool":
             result = data[offset] == 1
             offset += 1
-        elif object_type == "u8":
-            result = data[offset]
-            offset += 1
-        elif object_type in ["u32"]:
-            result = int.from_bytes(data[offset:offset + 4], byteorder="big")
-            offset += 4
-        elif object_type in ["u64"]:
-            result = int.from_bytes(data[offset:offset + 8], byteorder="big")
-            offset += 8
         elif object_type in ["TokenIdentifier", "EgldOrEsdtTokenIdentifier"]:
             result = data.decode()
             offset += 4
@@ -101,19 +95,13 @@ def read_hex(data, object_type, types):
                     continue
                 offset += 1
                 field_type = field_type.replace("Option<", '').replace(">", "")
-            if field_type in ["BigUint", "u64", "Address", "bool", "TokenIdentifier", "u32", "u8", "EgldOrEsdtTokenIdentifier"]:
+            if field_type in ["BigUint", "Address", "bool", "TokenIdentifier", "EgldOrEsdtTokenIdentifier"] + list(SIZE_PER_TYPE.keys()):
                 if field_type == "bool":
                     parsed_data[field_name] = bool(int(data[offset], 16))
                     offset += 1
-                elif field_type == "u8":
-                    parsed_data[field_name] = int(data[offset], 16)
-                    offset += 1
-                elif field_type in ["u32"]:
-                    parsed_data[field_name] = int.from_bytes(data[offset:offset + 4], byteorder="big")
-                    offset += 4
-                elif field_type in ["u64"]:
-                    parsed_data[field_name] = int.from_bytes(data[offset:offset + 8], byteorder="big")
-                    offset += 8
+                elif object_type in list(SIZE_PER_TYPE.keys()):
+                    parsed_data[field_name] = int.from_bytes(data[offset:offset + SIZE_PER_TYPE.get(object_type)], byteorder="big")
+                    offset += SIZE_PER_TYPE.get(object_type)
                 elif field_type in ["TokenIdentifier", "EgldOrEsdtTokenIdentifier"]:
                     obj_len = int.from_bytes(data[offset:offset + 4], byteorder="big")
                     offset += 4
