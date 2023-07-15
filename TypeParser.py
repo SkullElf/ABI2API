@@ -36,17 +36,20 @@ class ABITypeParser:
             return False
 
     def read_hex(self, data: bytes, object_type: str) -> Tuple[Any, int]:
-        if object_type in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "TokenIdentifier",
-                           "EgldOrEsdtTokenIdentifier", "BigUint", "bytes"]:
+        if object_type.startswith("optional<"):
+            subtype = object_type.replace("optional<", "")[:-1]
+            return self.read_hex(data, subtype)
+        elif object_type in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "TokenIdentifier",
+                             "EgldOrEsdtTokenIdentifier", "BigUint", "BigInt", "bytes", "isize", "usize"]:
             return self.read_primitive_type(data, object_type)
         elif object_type == "Address":
             return self.read_address_type(data)
         elif object_type.startswith("List<"):
             subtype = object_type.replace("List<", "")[:-1]
             return self.read_list_type(data, subtype)
-        elif object_type.startswith("optional<"):
-            subtype = object_type.replace("optional<", "")[:-1]
-            return self.read_hex(data, subtype)
+        elif object_type.startswith("vec<") or object_type.startswith("Vec<"):
+            subtype = object_type[4:-1]
+            return self.read_list_type(data, subtype)
         elif object_type.startswith("variadic<"):
             subtype = object_type.replace("variadic<", "")[:-1]
             return self.read_hex(data, subtype)
@@ -104,16 +107,17 @@ class ABITypeParser:
         if object_type == "bytes":
             obj_len = int.from_bytes(data[:4], byteorder="big")
             item_length = 4
-            parsed_item = data[4:obj_len+4].decode('ascii')
+            parsed_item = data[4:obj_len + 4].decode('ascii')
             if self.isBase64(parsed_item):
                 parsed_item = base64.b64decode(parsed_item).decode()
-                if (parsed_item.startswith('{') and parsed_item.endswith('}')) or (parsed_item.startswith('[') and parsed_item.endswith(']')):
+                if (parsed_item.startswith('{') and parsed_item.endswith('}')) or (
+                        parsed_item.startswith('[') and parsed_item.endswith(']')):
                     try:
                         parsed_item = json.loads(parsed_item)
                     except:
                         pass
             return parsed_item, item_length + obj_len
-        elif object_type in ["u8", "i8"]:
+        elif object_type in ["u8", "i8", "usize", "isize"]:
             parsed_item = int.from_bytes(data[:1], byteorder="big")
             item_length = 1
         elif object_type in ["u16", "i16"]:
@@ -132,7 +136,7 @@ class ABITypeParser:
             parsed_item, item_length = self.read_token_identifier(data)
         elif object_type == "EgldOrEsdtTokenIdentifier":
             parsed_item, item_length = self.read_egld_or_esdt_token_identifier(data)
-        elif object_type == "BigUint":
+        elif object_type in ["BigUint", "BigInt"]:
             obj_len = int.from_bytes(data[:4], byteorder="big")
             item_length = 4
             parsed_item = int.from_bytes(data[item_length:item_length + obj_len], byteorder="big")
@@ -183,4 +187,3 @@ class ABITypeParser:
         parsed_item, item_length = self.read_hex(data[offset:], subtype)
         offset += item_length
         return parsed_item, offset
-
