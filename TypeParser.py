@@ -17,7 +17,6 @@ class ABITypeParser:
         for hex_response in hex_responses:
             parsed_data, _ = self.read_hex(hex_response, response_type)
             result.append(parsed_data)
-        print(result)
         if len(result) == 1:
             return result[0]
         return result
@@ -45,6 +44,7 @@ class ABITypeParser:
         elif object_type == "Address":
             return self.read_address_type(data)
         elif object_type.startswith("List<"):
+
             subtype = object_type.replace("List<", "")[:-1]
             return self.read_list_type(data, subtype)
         elif object_type.startswith("vec<") or object_type.startswith("Vec<"):
@@ -69,8 +69,13 @@ class ABITypeParser:
                 offset = 0
                 for field in struct_fields:
                     field_name = field["name"]
+
                     field_type = field["type"]
-                    parsed_field, field_length = self.read_hex(data[offset:], field_type)
+                    if field_type.startswith("List<"):
+                        subtype = field_type.replace("List<", "")[:-1]
+                        parsed_field, field_length = self.read_sub_list_type(data[offset:], subtype)
+                    else:
+                        parsed_field, field_length = self.read_hex(data[offset:], field_type)
                     parsed_object[field_name] = parsed_field
                     offset += field_length
                 return parsed_object, offset
@@ -175,6 +180,16 @@ class ABITypeParser:
         while offset < len(data):
             parsed_item, item_length = self.read_hex(data[offset:], subtype)
             parsed_list.append(parsed_item)
+        return parsed_list, offset
+
+    def read_sub_list_type(self, data: bytes, subtype: str) -> Tuple[List[Any], int]:
+        parsed_list = []
+        list_length = int.from_bytes(data[:4], byteorder='big')
+        offset = 4
+        for list_item in range(list_length):
+            parsed_item, item_length = self.read_hex(data[offset:], subtype)
+            parsed_list.append(parsed_item)
+            offset += item_length
         return parsed_list, offset
 
     def read_option_type(self, data: bytes, subtype: str) -> Tuple[Optional[Any], int]:
