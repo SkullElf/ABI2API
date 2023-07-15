@@ -1,5 +1,7 @@
 from typing import Any, List, Dict, Optional, Tuple
 from multiversx_sdk_core import Address
+import base64
+import json
 
 
 class ABITypeParser:
@@ -15,9 +17,23 @@ class ABITypeParser:
         for hex_response in hex_responses:
             parsed_data, _ = self.read_hex(hex_response, response_type)
             result.append(parsed_data)
+        print(result)
         if len(result) == 1:
             return result[0]
         return result
+
+    def isBase64(self, sb):
+        try:
+            if isinstance(sb, str):
+                # If there's any unicode here, an exception will be thrown and the function will return false
+                sb_bytes = bytes(sb, 'ascii')
+            elif isinstance(sb, bytes):
+                sb_bytes = sb
+            else:
+                raise ValueError("Argument must be string or bytes")
+            return base64.b64encode(base64.b64decode(sb_bytes)) == sb_bytes
+        except Exception:
+            return False
 
     def read_hex(self, data: bytes, object_type: str) -> Tuple[Any, int]:
         if object_type in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "TokenIdentifier",
@@ -86,7 +102,17 @@ class ABITypeParser:
 
     def read_primitive_type(self, data: bytes, object_type: str) -> Tuple[Any, int]:
         if object_type == "bytes":
-            return data, len(data)
+            obj_len = int.from_bytes(data[:4], byteorder="big")
+            item_length = 4
+            parsed_item = data[4:obj_len+4].decode('ascii')
+            if self.isBase64(parsed_item):
+                parsed_item = base64.b64decode(parsed_item).decode()
+                if (parsed_item.startswith('{') and parsed_item.endswith('}')) or (parsed_item.startswith('[') and parsed_item.endswith(']')):
+                    try:
+                        parsed_item = json.loads(parsed_item)
+                    except:
+                        pass
+            return parsed_item, item_length + obj_len
         elif object_type in ["u8", "i8"]:
             parsed_item = int.from_bytes(data[:1], byteorder="big")
             item_length = 1
@@ -145,12 +171,6 @@ class ABITypeParser:
         while offset < len(data):
             parsed_item, item_length = self.read_hex(data[offset:], subtype)
             parsed_list.append(parsed_item)
-            offset += item_length
-            if offset < len(data) and data[offset] == 1:
-                offset += 1
-            else:
-                break
-
         return parsed_list, offset
 
     def read_option_type(self, data: bytes, subtype: str) -> Tuple[Optional[Any], int]:

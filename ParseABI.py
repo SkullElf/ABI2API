@@ -14,7 +14,6 @@ def int_to_hex(number):
 def convert_args(args):
     args_output = []
     for arg in args:
-        print(arg)
         if arg["type"].startswith("variadic<"):
             arg["type"] = arg["type"].replace("variadic<", "")[:-1]
         if "<" in arg["type"]:
