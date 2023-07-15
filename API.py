@@ -23,13 +23,13 @@ types = abi_json["types"]
 
 # Set up Swagger UI blueprint
 swagger_ui_blueprint = get_swaggerui_blueprint(
-    '/api/docs',
-    '/api/swagger.json',
+    '/apidocs',
+    f'/api/{SCADDRESS}.json',
     config={
-        'app_name': "ABI API"
+        'app_name': f"ABI2API Parsed ABI JSON - {abi_json['name']}"
     }
 )
-app.register_blueprint(swagger_ui_blueprint, url_prefix='/api/docs')
+app.register_blueprint(swagger_ui_blueprint, url_prefix='/apidocs')
 
 swagger = Swagger(app)
 
@@ -80,9 +80,8 @@ def create_endpoint_resource_class(endpoint_data):
                     'schema': {
                         'type': 'object',
                         'properties': {
-                            output_data.get('name', 'output'): {
-                                'type': output_data.get('type', 'output')
-                            } for output_data in endpoint_data.get('outputs', [])
+                            output_data.get('name', 'output'): resolve_output_type(output_data.get('type', 'output'))
+                            for output_data in endpoint_data.get('outputs', [])
                         }
                     }
                 }
@@ -100,7 +99,7 @@ def create_endpoint_resource_class(endpoint_data):
             args = []
             for input_data in endpoint_data['inputs']:
                 input_name = input_data['name']
-                input_value = str(request.args.get(input_name))
+                input_value = str(request.args.get(input_name, default=''))
                 is_optional = input_data['type'].startswith("optional")
 
                 if is_optional:
@@ -144,6 +143,7 @@ def create_endpoint_resource_class(endpoint_data):
     return EndpointResource
 
 
+
 def resolve_input_type(input_type):
     cleaned_type = re.sub(r"<.*?>", "", input_type)
     cleaned_type = re.sub(r"optional|variadic", "", cleaned_type)
@@ -157,73 +157,231 @@ def resolve_input_type(input_type):
         "u32": "integer",
         "u8": "integer"
     }
-    return datatypes.get(cleaned_type, "string")
+    return datatypes.get(cleaned_type, "string")  # Map "u32" to "integer" explicitly
+
+
+from marshmallow import EXCLUDE
 
 
 class ABITypeSchema(Schema):
     class Meta:
         ordered = True
+        unknown = EXCLUDE
 
     name = fields.Str(required=True)
     mutability = fields.Str(required=True)
     inputs = fields.List(fields.Dict(), required=True)
     outputs = fields.List(fields.Dict())
 
+def resolve_output_type(output_type):
+    basic_types = {
+        'i8': {'type': 'integer', 'example': 6},
+        'i32': {'type': 'integer', 'example': 6},
+        'i64': {'type': 'integer', 'example': 6},
+        'u8': {'type': 'integer', 'example': 6},
+        'u32': {'type': 'integer', 'example': 6},
+        'u64': {'type': 'integer', 'example': 6},
+        'isize': {'type': 'integer', 'example': 6},
+        'usize': {'type': 'integer', 'example': 6},
+        'bytes': {'type': 'string', 'example': 'When the time of the White Frost comes, do not eat the yellow snow!'},
+        'bool': {'type': 'boolean', 'example': False},
+        'BigUint': {'type': 'string', 'example': '69000000000000000000'},
+        'BigInt': {'type': 'string', 'example': '69000000000000000000'},
+        'EgldOrEsdtTokenIdentifier': {'type': 'string', 'example': 'EGLD'},
+        'TokenIdentifier': {'type': 'string', 'example': 'ELLAMA-6c0295'},
+        'Address': {'type': 'string', 'example': 'erd1ccxmfaganejartfyr9ack4lnudxam8ezzwn23k3x5nls97rjaeds7f2wu2'}
+    }
 
-# Generate the Swagger JSON specification
-swagger_json = {
-    'swagger': '2.0',
-    'info': {
-        'title': 'ABI API',
-        'description': 'API documentation for ABI endpoints',
-        'version': '1.0'
-    },
-    'paths': {},
-    'definitions': {}
-}
+    conditions = {
+        'variadic': lambda subtype: {
+            'type': 'array',
+            'items': resolve_output_type(subtype),
+            'example': [resolve_output_type(subtype)['example']]
+        },
+        'List': lambda subtype: {
+            'type': 'array',
+            'items': resolve_output_type(subtype),
+            'example': [resolve_output_type(subtype)['example']]
+        },
+        'vec': lambda subtype: {
+            'type': 'array',
+            'items': resolve_output_type(subtype),
+            'example': [resolve_output_type(subtype)['example']]
+        },
+        'Option': lambda subtype: {
+            'type': resolve_output_type(subtype)['type'],
+            'nullable': True,
+            'example': resolve_output_type(subtype)['example']
+        },
+        'optional': lambda subtype: resolve_output_type(subtype),
+        'tuple': lambda subtype: {
+            'type': 'array',
+            'items': [resolve_output_type(subtype_item) for subtype_item in subtype],
+            'example': [resolve_output_type(subtype_item)['example'] for subtype_item in subtype]
+        },
+        'enum': lambda subtype: {
+            'type': 'string',
+            'example': 'enum_value'
+        },
+        'multi': lambda subtype: {
+            'type': 'array',
+            'items': resolve_output_type(subtype),
+            'example': [resolve_output_type(subtype)['example']]
+        }
+    }
 
+    if isinstance(output_type, list):
+        output_type = output_type[0]
+
+    if isinstance(output_type, str):
+        if output_type in basic_types:
+            resolved_type = basic_types[output_type]
+        elif output_type.startswith(('optional<', 'Option<')):
+            subtype = output_type[output_type.index('<') + 1:-1]
+            resolved_type = conditions['Option'](subtype)
+        elif output_type.startswith(('variadic<', 'List<', 'vec<', 'multi<')):
+            subtype = output_type[output_type.index('<') + 1:-1]
+            resolved_type = conditions[output_type[:output_type.index('<')]](subtype)
+        elif output_type in conditions:
+            resolved_type = conditions[output_type](output_type)
+        else:
+            custom_type = types.get(output_type)
+            if custom_type:
+                if custom_type['type'] == 'enum':
+                    enum_variants = custom_type['variants']
+                    enum_values = [variant['name'] for variant in enum_variants]
+                    resolved_type = {'type': 'string', 'enum': enum_values, 'example': enum_values[0]}
+                else:
+                    fields = custom_type['fields']
+                    resolved_fields = {
+                        field['name']: resolve_output_type(field['type'])
+                        for field in fields
+                    }
+                    resolved_type = {
+                        'type': 'object',
+                        'properties': resolved_fields,
+                        'example': {field['name']: resolve_output_type(field['type'])['example'] for field in fields}
+                    }
+            else:
+                if ',' in output_type and '<' not in output_type and '>' not in output_type:
+                    subtypes = [subtype.strip() for subtype in output_type.split(',')]
+                    resolved_type = {
+                        'type': 'array',
+                        'items': [resolve_output_type(subtype) for subtype in subtypes],
+                        'example': [resolve_output_type(subtype)['example'] for subtype in subtypes]
+                    }
+                else:
+                    resolved_type = {'type': 'Unknown Type: ' + output_type, 'example': 'unknown'}
+                    if resolved_type['type'].startswith('Unknown Type: Unknown Type: '):
+                        resolved_type['type'] = resolved_type['type'][18:]  # Remove the duplicated prefix
+        return resolved_type
+    else:
+        # If the output type is not a string, it means it's already resolved, so return as is
+        return output_type
+
+
+
+
+
+
+def generate_custom_swagger_json():
+    # Generate the Swagger JSON specification
+    swagger_json = {
+        'swagger': '2.0',
+        'info': {
+            'title': f"ABI2API - API for Smart Contract: {abi_json['name']}",
+            'description': f'Swagger API documentation for ABI JSON on the MultiversX Blockchain\nFeel free to follow Bobbet on <a href=\"https://twitter.com/BobbetBot\">Twitter</a>\n\nThis API provides data from a smart contract in the address: <a href=\"https://explorer.multiversx.com/accounts/{SCADDRESS}\">{SCADDRESS}</a>',
+            'version': '1.0'
+        },
+        'paths': {},
+        'definitions': {},
+        'tags': [
+            {
+                'name': 'Readonly Endpoints',
+                'description': 'Endpoints that are read-only'
+            }
+        ]
+    }
+
+    for endpoint in abi_json['endpoints']:
+        if endpoint["mutability"] == "readonly":
+            schema = ABITypeSchema()
+            endpoint_data = schema.load(endpoint)
+
+            # Generate the path for the Swagger JSON specification
+            swagger_path = f"/{endpoint['name']}"
+            swagger_parameters = []
+            for input_data in endpoint_data['inputs']:
+                input_name = input_data['name']
+                input_type = input_data['type']
+                is_optional = input_type.startswith("optional")
+
+                # Determine the data type of the input parameter
+                if input_type.startswith("optional<"):
+                    input_type = input_type[9:-1]
+
+                swagger_parameter = {
+                    'name': input_name,
+                    'in': 'query',
+                    'required': not is_optional
+                }
+
+                if input_type == "u32":
+                    swagger_parameter['type'] = 'integer'
+                else:
+                    swagger_parameter['type'] = 'string'
+
+                swagger_parameters.append(swagger_parameter)
+
+            swagger_json['paths'][swagger_path] = {
+                'get': {
+                    'summary': endpoint['name'],
+                    'parameters': swagger_parameters,
+                    'responses': {
+                        '200': {
+                            'description': 'Success',
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    output_data.get('name', 'output'): resolve_output_type(output_data.get('type', 'output'))
+                                    for output_data in endpoint.get('outputs', [])
+                                }
+                            }
+                        }
+                    },
+                    'tags': ["Readonly Endpoints"]
+                }
+            }
+
+            # Generate the definition for the Swagger JSON specification
+            swagger_definition = {
+                'type': 'object',
+                'properties': {
+                    output_data.get('name', 'output'): resolve_output_type(output_data.get('type', 'output'))
+                    for output_data in endpoint.get('outputs', [])
+                }
+            }
+            swagger_json['definitions'][f"{endpoint['name']}_response"] = swagger_definition
+
+    return swagger_json
+
+
+
+
+
+# Register the resource classes
 for endpoint in abi_json['endpoints']:
     if endpoint["mutability"] == "readonly":
         schema = ABITypeSchema()
         endpoint_data = schema.load(endpoint)
         resource_class = create_endpoint_resource_class(endpoint_data)
-
-        # Add the resource to the API
         api.add_resource(resource_class, f"/{endpoint['name']}")
 
-        # Generate the path for the Swagger JSON specification
-        swagger_path = f"/{endpoint['name']}"
-        swagger_parameters = swagger_json['paths'].get(swagger_path, {}).get('parameters', [])
-        swagger_parameters.extend(endpoint_data['inputs'])
-        swagger_json['paths'][swagger_path] = {
-            'get': {
-                'summary': endpoint['name'],
-                'parameters': swagger_parameters,
-                'responses': {
-                    '200': {
-                        'description': 'Success',
-                        'schema': {
-                            '$ref': f"#/definitions/{endpoint['name']}_response"
-                        }
-                    }
-                }
-            }
-        }
-
-        # Generate the definition for the Swagger JSON specification
-        swagger_definition = {
-            'type': 'object',
-            'properties': {
-                output_data.get('name', 'output'): {
-                    'type': output_data.get('type', 'output')
-                } for output_data in endpoint.get('outputs', [])
-            }
-        }
-        swagger_json['definitions'][f"{endpoint['name']}_response"] = swagger_definition
 
 # Endpoint to serve the Swagger JSON specification
-@app.route('/api/swagger.json')
+@app.route(f'/api/{SCADDRESS}.json')
 def serve_swagger_json():
+    swagger_json = generate_custom_swagger_json()
     return jsonify(swagger_json)
 
 

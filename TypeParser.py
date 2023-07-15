@@ -144,7 +144,7 @@ class ABITypeParser:
         elif object_type in ["BigUint", "BigInt"]:
             obj_len = int.from_bytes(data[:4], byteorder="big")
             item_length = 4
-            parsed_item = int.from_bytes(data[item_length:item_length + obj_len], byteorder="big")
+            parsed_item = str(int.from_bytes(data[item_length:item_length + obj_len], byteorder="big"))
             item_length += obj_len
         else:
             raise ValueError(f"Unsupported primitive type: {object_type}")
