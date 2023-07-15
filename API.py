@@ -1,12 +1,15 @@
-from flask import Flask, request, Response
+from flask import Flask, request, Response, jsonify
 from flask_restful import Api, Resource, reqparse
-from flasgger import Swagger, swag_from
+from flask_swagger_ui import get_swaggerui_blueprint
+from marshmallow import Schema, fields
 import re
+from flasgger import Swagger, swag_from
 import asyncio
 import json
 from gevent.pywsgi import WSGIServer
 
 from ParseABI import parse_abi
+
 from config import SCADDRESS, ABI_PATH
 
 app = Flask(__name__)
@@ -18,11 +21,23 @@ with open(ABI_PATH) as f:
 endpoints = abi_json["endpoints"]
 types = abi_json["types"]
 
+# Set up Swagger UI blueprint
+swagger_ui_blueprint = get_swaggerui_blueprint(
+    '/api/docs',
+    '/api/swagger.json',
+    config={
+        'app_name': "ABI API"
+    }
+)
+app.register_blueprint(swagger_ui_blueprint, url_prefix='/api/docs')
+
 swagger = Swagger(app)
 
 
 def create_endpoint_resource_class(endpoint_data):
     input_parser = reqparse.RequestParser()
+    swagger_parameters = []  # List to hold the Swagger parameters
+
     for input_data in endpoint_data['inputs']:
         input_name = input_data['name']
         input_type = input_data['type']
@@ -36,18 +51,29 @@ def create_endpoint_resource_class(endpoint_data):
         if input_type.startswith("optional<"):
             input_parser.add_argument(f"opt_{input_name}", type=str, location='form')
 
+        # Generate Swagger parameter definition for each input
+        swagger_parameter = {
+            'name': input_name,
+            'in': 'query',
+            'required': True if not input_type.startswith("optional") else False
+        }
+
+        # Determine the data type of the input parameter
+        if multi_arg:
+            swagger_parameter['type'] = 'array'
+            swagger_parameter['items'] = {
+                'type': 'string'
+            }
+        else:
+            swagger_parameter['type'] = resolve_input_type(input_type)
+
+        swagger_parameters.append(swagger_parameter)
+
     class_name = f"EndpointResource_{endpoint_data['name']}"
 
     class EndpointResource(Resource):
         @swag_from({
-            'parameters': [
-                {
-                    'name': input_data['name'],
-                    'in': 'query',
-                    'type': resolve_input_type(input_data['type']),
-                    'required': True if not input_data['type'].startswith("optional<") else False
-                } for input_data in endpoint_data['inputs']
-            ],
+            'parameters': swagger_parameters,
             'responses': {
                 200: {
                     'description': 'Success',
@@ -75,7 +101,7 @@ def create_endpoint_resource_class(endpoint_data):
             for input_data in endpoint_data['inputs']:
                 input_name = input_data['name']
                 input_value = str(request.args.get(input_name))
-                is_optional = input_data['type'].startswith("optional<")
+                is_optional = input_data['type'].startswith("optional")
 
                 if is_optional:
                     if input_value is None:
@@ -96,7 +122,7 @@ def create_endpoint_resource_class(endpoint_data):
                     })
                 else:
                     args.append({
-                        "value": input_value,
+                        "value": str(input_value),
                         "type": input_data["type"]
                     })
 
@@ -105,16 +131,14 @@ def create_endpoint_resource_class(endpoint_data):
                 SCADDRESS,
                 endpoint_data["name"],
                 endpoints,
-                types,
+                abi_json,
                 args=args
             )
+            code, output = output
+            if code == 400:
+                return Response(output, 400)
 
-            if output is None:
-                return Response(f"Data returned empty", 500)
-            if len([d for d in endpoint_data['outputs'] if 'multi_result' in d and d['multi_result']]) == len(
-                    endpoint_data['outputs']):
-                return Response(json.dumps(output), mimetype='application/json')  # Return the output as JSON
-            return Response(json.dumps(output[0]), mimetype='application/json')  # Return the first element as JSON
+            return jsonify(output)  # Return the output as JSON
 
     EndpointResource.__name__ = class_name
     return EndpointResource
@@ -136,11 +160,71 @@ def resolve_input_type(input_type):
     return datatypes.get(cleaned_type, "string")
 
 
-# Add the endpoint resources dynamically based on the ABI JSON
+class ABITypeSchema(Schema):
+    class Meta:
+        ordered = True
+
+    name = fields.Str(required=True)
+    mutability = fields.Str(required=True)
+    inputs = fields.List(fields.Dict(), required=True)
+    outputs = fields.List(fields.Dict())
+
+
+# Generate the Swagger JSON specification
+swagger_json = {
+    'swagger': '2.0',
+    'info': {
+        'title': 'ABI API',
+        'description': 'API documentation for ABI endpoints',
+        'version': '1.0'
+    },
+    'paths': {},
+    'definitions': {}
+}
+
 for endpoint in abi_json['endpoints']:
     if endpoint["mutability"] == "readonly":
-        resource_class = create_endpoint_resource_class(endpoint)
+        schema = ABITypeSchema()
+        endpoint_data = schema.load(endpoint)
+        resource_class = create_endpoint_resource_class(endpoint_data)
+
+        # Add the resource to the API
         api.add_resource(resource_class, f"/{endpoint['name']}")
+
+        # Generate the path for the Swagger JSON specification
+        swagger_path = f"/{endpoint['name']}"
+        swagger_parameters = swagger_json['paths'].get(swagger_path, {}).get('parameters', [])
+        swagger_parameters.extend(endpoint_data['inputs'])
+        swagger_json['paths'][swagger_path] = {
+            'get': {
+                'summary': endpoint['name'],
+                'parameters': swagger_parameters,
+                'responses': {
+                    '200': {
+                        'description': 'Success',
+                        'schema': {
+                            '$ref': f"#/definitions/{endpoint['name']}_response"
+                        }
+                    }
+                }
+            }
+        }
+
+        # Generate the definition for the Swagger JSON specification
+        swagger_definition = {
+            'type': 'object',
+            'properties': {
+                output_data.get('name', 'output'): {
+                    'type': output_data.get('type', 'output')
+                } for output_data in endpoint.get('outputs', [])
+            }
+        }
+        swagger_json['definitions'][f"{endpoint['name']}_response"] = swagger_definition
+
+# Endpoint to serve the Swagger JSON specification
+@app.route('/api/swagger.json')
+def serve_swagger_json():
+    return jsonify(swagger_json)
 
 
 if __name__ == '__main__':
