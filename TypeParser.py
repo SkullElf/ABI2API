@@ -180,6 +180,7 @@ class ABITypeParser:
         while offset < len(data):
             parsed_item, item_length = self.read_hex(data[offset:], subtype)
             parsed_list.append(parsed_item)
+            offset += item_length
         return parsed_list, offset
 
     def read_sub_list_type(self, data: bytes, subtype: str) -> Tuple[List[Any], int]:

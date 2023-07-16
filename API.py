@@ -93,6 +93,7 @@ def create_endpoint_resource_class(endpoint_data):
             result = asyncio.run(self.get_async())
             return result
 
+        # Process the input and call the smart contract based on the endpoint name
         async def get_async(self):
             # Parse the input data from the request
             inputs = {}
@@ -101,22 +102,17 @@ def create_endpoint_resource_class(endpoint_data):
                 input_name = input_data['name']
                 input_value = str(request.args.get(input_name, default=''))
                 is_optional = input_data['type'].startswith("optional")
+                is_multi_arg = input_data.get('multi_arg', False)
 
-                if is_optional:
-                    if input_value is None:
-                        opt_input_value = request.args.get(f"opt_{input_name}")
-                        if opt_input_value is None:
-                            inputs[input_name] = None
-                        else:
-                            inputs[input_name] = [opt_input_value]
-                    else:
-                        inputs[input_name] = [input_value]
+                if is_multi_arg:
+                    input_values = input_value.split(',')
+                    inputs[input_name] = input_values
                 else:
                     inputs[input_name] = input_value
 
                 if is_optional:
                     args.append({
-                        "value": inputs[input_name][0] if inputs[input_name] else None,
+                        "value": inputs[input_name][0] if is_multi_arg else inputs[input_name],
                         "type": input_data["type"]
                     })
                 else:
@@ -126,21 +122,15 @@ def create_endpoint_resource_class(endpoint_data):
                     })
 
             # Process the input and call the smart contract based on the endpoint name
-            output = await parse_abi(
-                SCADDRESS,
-                endpoint_data["name"],
-                endpoints,
-                abi_json,
-                args=args
-            )
+            output = await parse_abi(SCADDRESS, endpoint_data["name"], endpoints, abi_json, args)
             code, output = output
             if code == 400:
                 return Response(output, 400)
 
-            return jsonify(output)  # Return the output as JSON
-
+            return jsonify(output)
     EndpointResource.__name__ = class_name
     return EndpointResource
+
 
 
 
@@ -280,10 +270,6 @@ def resolve_output_type(output_type):
         return output_type
 
 
-
-
-
-
 def generate_custom_swagger_json():
     # Generate the Swagger JSON specification
     swagger_json = {
@@ -315,6 +301,7 @@ def generate_custom_swagger_json():
                 input_name = input_data['name']
                 input_type = input_data['type']
                 is_optional = input_type.startswith("optional")
+                is_multi_arg = input_data.get('multi_arg', False)
 
                 # Determine the data type of the input parameter
                 if input_type.startswith("optional<"):
@@ -326,7 +313,12 @@ def generate_custom_swagger_json():
                     'required': not is_optional
                 }
 
-                if input_type == "u32":
+                if is_multi_arg:
+                    swagger_parameter['type'] = 'array'
+                    swagger_parameter['items'] = {
+                        'type': 'string'
+                    }
+                elif input_type == "u32":
                     swagger_parameter['type'] = 'integer'
                 else:
                     swagger_parameter['type'] = 'string'
@@ -363,10 +355,12 @@ def generate_custom_swagger_json():
             }
             swagger_json['definitions'][f"{endpoint['name']}_response"] = swagger_definition
 
+            # Update the Swagger parameter to represent the multi_arg input as an array
+            for parameter in swagger_parameters:
+                if parameter['name'] in endpoint_data['inputs']:
+                    parameter['x-multi-item'] = True
+
     return swagger_json
-
-
-
 
 
 # Register the resource classes
