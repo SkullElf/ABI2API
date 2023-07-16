@@ -14,7 +14,7 @@ ABI2API is a Python library for converting smart contract ABI (Application Binar
 1. Clone the repository:
 
 ```
-git clone https://github.com/SkullElf/abi2api.git
+git clone https://github.com/SkullElf/ABI2API.git
 ```
 Install the required dependencies:
 ```
