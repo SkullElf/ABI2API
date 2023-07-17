@@ -39,7 +39,7 @@ class ABITypeParser:
             subtype = object_type.replace("optional<", "")[:-1]
             return self.read_hex(data, subtype)
         elif object_type in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "TokenIdentifier",
-                             "EgldOrEsdtTokenIdentifier", "BigUint", "BigInt", "bytes", "isize", "usize"]:
+                             "EgldOrEsdtTokenIdentifier", "BigUint", "BigInt", "bytes", "isize", "usize", "H256"]:
             return self.read_primitive_type(data, object_type)
         elif object_type == "Address":
             return self.read_address_type(data)
@@ -134,6 +134,9 @@ class ABITypeParser:
         elif object_type in ["u64", "i64"]:
             parsed_item = int.from_bytes(data[:8], byteorder="big")
             item_length = 8
+        elif object_type == "H256":
+            parsed_item = data[:32]
+            item_length = 32
         elif object_type == "bool":
             parsed_item = bool(int.from_bytes(data[:1], byteorder="big"))
             item_length = 1
