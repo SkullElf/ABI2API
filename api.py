@@ -244,7 +244,7 @@ def generate_custom_swagger_json():
         'swagger': '2.0',
         'info': {
             'title': f"ABI2API - API for Smart Contract: {abi_json['name']}",
-            'description': f'## Description\nSwagger API documentation for ABI JSON on the MultiversX Blockchain.\n## Credits\nBuilt by: SkullElf\nFeel free to follow Bobbet on <a href=\"https://twitter.com/BobbetBot\">Twitter</a>\nHuge thanks to everyone who supported and tested this tool, and mainly:\n* XOXNO\'s team\n* Martin Wagner - Knights of Cathena \n\n## Details\nThis API instance provides data from a smart contract in the address: <a href=\"https://explorer.multiversx.com/accounts/{SCADDRESS}\">{SCADDRESS}</a>',
+            'description': f'## Description\nSwagger API documentation for ABI JSON on the MultiversX Blockchain.\n## Credits\nBuilt by: SkullElf\nFeel free to follow Bobbet on <a href=\"https://twitter.com/BobbetBot\">Twitter</a>\nHuge thanks to everyone who supported and tested this tool, and mainly:\n* XOXNO\'s team\n* uPong (Enzo Foucaud)\n* Martin Wagner - Knights of Cathena \n\n## Details\nThis API instance provides data from a smart contract in the address: <a href=\"https://explorer.multiversx.com/accounts/{SCADDRESS}\">{SCADDRESS}</a>',
             'version': '1.0'
         },
         'paths': {},
