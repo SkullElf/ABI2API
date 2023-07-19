@@ -40,7 +40,7 @@ cp config/abi.example.json abi.json
 ## Configuration abi.json
 ABIs are a collection of metatada about the contract.
 
-Replace the contents of the abi.json file with the ABI of your smart contract.
+Replace the path of the abi.json file with the ABI of your smart contract.
 
 ## Usage
 
