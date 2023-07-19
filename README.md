@@ -39,7 +39,7 @@ Access the API documentation:
 Open your web browser and visit http://localhost:80/apidocs to view the Swagger UI documentation for the generated API.
 
 Make API requests:
-You can now make GET and POST requests to interact with your smart contract functions. Refer to the API documentation for the available endpoints and request formats.
+You can now make GET requests to interact with your smart contract functions. Refer to the API documentation for the available endpoints and request formats.
 
 ## Contributing
 Contributions are welcome! If you find any issues or have suggestions for improvements, please feel free to open an issue or submit a pull request.
