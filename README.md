@@ -1,6 +1,6 @@
 # ABI2API
 
-ABI2API is a Python library for converting smart contract ABI (Application Binary Interface) into a RESTful API. It allows developers to expose the functionality of a smart contract through a simple API interface, making it easier to interact with the contract.
+ABI2API is a Python library for converting smart contract ABI (Application Binary Interface) on the MultiversX blockchain into a RESTful API. It allows developers to expose the functionality of a smart contract through a simple API interface, making it easier to interact with Smart Contracts.
 
 ## Features
 
@@ -27,15 +27,16 @@ Update the config.py file with your specific configuration settings.
 Place the following in the relevant variables:
 1. ABI JSON file path.
 2. The corresponding Smart Contract address.
+3. Specify the port in which you want the API to be available (default=80).
    
 Start the API server:
 
 ```
-python API.py
+python api.py
 ```
 
 Access the API documentation:
-Open your web browser and visit http://localhost:5000/apidocs to view the Swagger UI documentation for the generated API.
+Open your web browser and visit http://localhost:80/apidocs to view the Swagger UI documentation for the generated API.
 
 Make API requests:
 You can now make GET and POST requests to interact with your smart contract functions. Refer to the API documentation for the available endpoints and request formats.
