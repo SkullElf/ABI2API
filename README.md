@@ -20,6 +20,28 @@ Install the required dependencies:
 ```
 pip install -r requirements.txt
 ```
+
+## Configuration
+
+```bash
+# Copy the configuration file and make the necessary modifications.
+cp config/config.example.py config.py
+# Copy the ABI file to the project directory.
+cp config/abi.example.json abi.json
+```
+
+## Configuration config.py
+| Variable Name                                      | config.py                                 |
+| -------------------------------------------------- | ----------------------------------------- |
+| SCADDRESS # Replace with smart contract address    | SCADDRESS: "erdqqqqqqqqqqqqq..."          |
+| ABI_PATH # Replace with ABI path                   | ABI_PATH: "abi.json"                      |
+| PORT # Replace with port for the application       | PORT: "80"                                |
+
+## Configuration abi.json
+ABIs are a collection of metatada about the contract.
+
+Replace the path of the abi.json file with the ABI of your smart contract.
+
 ## Usage
 
 Update the config.py file with your specific configuration settings.
