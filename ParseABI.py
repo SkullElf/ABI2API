@@ -1,7 +1,6 @@
 import base64
 import aiohttp
 from multiversx_sdk_core import Address
-import json
 from config import PROXY_URL, SIZE_PER_TYPE
 from TypeParser import ABITypeParser
 
@@ -59,9 +58,21 @@ async def query_sc(endpoint, sc_address, args=None):
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=body) as response:
-            response_json = await response.json()
-            if response_json["data"]["data"]["returnCode"] != "ok":
-                return None, response_json["data"]["data"]["returnMessage"]
+            try:
+                response_json = await response.json()
+            except:
+                return 500, "Failed to load JSON response from gateway"
+            if response.status != 200:
+                return response.status, response_json["error"]
+            try:
+                if response_json["data"]["data"]["returnCode"] != "ok":
+                    return 400, response_json["data"]["data"]["returnMessage"]
+            except:
+                if response_json['error'] != "":
+                    if response_json == "'executeQuery: executeQuery: execution failed with timeout'":
+                        print(f"Trying again: {response_json['error']}")
+                        await query_sc(endpoint, sc_address, args)
+
             return response_json["data"]["data"]["returnData"]
 
 
@@ -77,5 +88,8 @@ async def parse_abi(sc_address, func, endpoints, abi_json, args=None):
     decoded_answer = decode_return_data(answer)
     abi_type_parser = ABITypeParser(abi_json)
     response_type = endpoint_data["outputs"][0]["type"]
-    parsed_data = abi_type_parser.parse_hex_response(decoded_answer, response_type)
-    return 200, parsed_data
+    try:
+        parsed_data = abi_type_parser.parse_hex_response(decoded_answer, response_type)
+        return 200, parsed_data
+    except Exception as e:
+        return 500, str(e)
