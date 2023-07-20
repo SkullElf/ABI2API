@@ -59,6 +59,9 @@ class ABITypeParser:
         elif object_type.startswith("multi<"):
             subtypes = object_type.replace("multi<", "")[:-1].split(",")
             return self.read_multi_type(data, subtypes)
+        elif object_type.startswith("tuple<"):
+            subtypes = object_type.replace("tuple<", "")[:-1].split(",")
+            return self.read_multi_type(data, subtypes)
         elif object_type in self.types:
             fields = self.types[object_type]
             if isinstance(fields, dict) and fields.get("type") == "enum":
