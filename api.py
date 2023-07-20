@@ -4,6 +4,7 @@ from marshmallow import Schema, fields, EXCLUDE
 import json
 import re
 import uvicorn
+import requests
 
 from dark_theme_css import CSS
 from config import ABI_PATH, SCADDRESS, PORT
@@ -11,9 +12,13 @@ from ParseABI import parse_abi
 
 app = Quart(__name__)
 
-# Load ABI JSON from file
-with open(ABI_PATH) as f:
-    abi_json = json.load(f)
+# Load ABI JSON from the internet
+if ABI_PATH.startswith("https://") or ABI_PATH.startswith("http://"):
+    abi_json = requests.get(ABI_PATH).json()
+else:
+    # Load ABI JSON from file
+    with open(ABI_PATH) as f:
+        abi_json = json.load(f)
 endpoints = abi_json["endpoints"]
 types = abi_json["types"]
 
