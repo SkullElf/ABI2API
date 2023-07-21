@@ -5,22 +5,17 @@ import json
 import re
 import uvicorn
 import requests
-
+import multiprocessing
 from dark_theme_css import CSS
-from config import ABI_PATH, SCADDRESS, PORT
+import config
 from ParseABI import parse_abi
 
-app = Quart(__name__)
 
-# Load ABI JSON from the internet
-if ABI_PATH.startswith("https://") or ABI_PATH.startswith("http://"):
-    abi_json = requests.get(ABI_PATH).json()
-else:
-    # Load ABI JSON from file
-    with open(ABI_PATH) as f:
-        abi_json = json.load(f)
-endpoints = abi_json["endpoints"]
-types = abi_json["types"]
+app = None
+abi_json = {}
+types = {}
+endpoints = {}
+SCADDRESS = ""
 
 
 class ABITypeSchema(Schema):
@@ -189,6 +184,7 @@ def create_endpoint_resource_class(endpoint_data):
         async def dispatch_request(self):
             inputs = {}
             args = []
+            scaddress = str(request.args.get("smartcontractaddress", default=SCADDRESS))
             for input_data in endpoint_data['inputs']:
                 input_name = input_data['name']
                 input_value = str(request.args.get(input_name, default=''))
@@ -213,7 +209,7 @@ def create_endpoint_resource_class(endpoint_data):
                     })
 
             # Process the input and call the smart contract based on the endpoint name
-            output = await parse_abi(SCADDRESS, endpoint_data["name"], endpoints, abi_json, args)
+            output = await parse_abi(scaddress, endpoint_data["name"], endpoints, abi_json, args)
             code, output = output
             if code != 200:
                 message = {"error": output}
@@ -227,20 +223,6 @@ def create_endpoint_resource_class(endpoint_data):
     return EndpointResource
 
 
-# Register the resource classes
-for endpoint in abi_json['endpoints']:
-    if endpoint["mutability"] == "readonly":
-        schema = ABITypeSchema()
-        endpoint_data = schema.load(endpoint)
-        resource_class = create_endpoint_resource_class(endpoint_data)
-        endpoint_name = endpoint['name']
-
-        # Add the route
-        app.add_url_rule(
-            f"/{endpoint_name}",
-            view_func=resource_class.as_view(endpoint_name),
-            methods=['GET']
-        )
 
 
 def generate_custom_swagger_json():
@@ -344,49 +326,89 @@ def generate_custom_swagger_json():
     return swagger_json
 
 
-@app.route(f'/{SCADDRESS}.json')
-async def swagger():
-    return jsonify(generate_custom_swagger_json())
+def run_api(sc_address=config.SCADDRESS, abi_path=config.ABI_PATH, port=config.PORT):
+    global abi_json, types, endpoints, SCADDRESS, app
+    app = Quart(__name__)
+    SCADDRESS = sc_address
+    # Load ABI JSON from the internet
+    if abi_path.startswith("https://") or abi_path.startswith("http://"):
+        abi_json = requests.get(abi_path).json()
+    else:
+        # Load ABI JSON from file
+        with open(abi_path) as f:
+            abi_json = json.load(f)
+    endpoints = abi_json["endpoints"]
+    types = abi_json["types"]
 
+    @app.route(f'/{SCADDRESS}.json')
+    async def swagger():
+        return jsonify(generate_custom_swagger_json())
 
-# Serve the Swagger UI
-@app.route('/apidocs/')
-async def api_docs():
-    swagger_ui_html = '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>ABI2API - MultiversX</title>
-        <link rel="icon" type="image/png" size="32x32" href="https://wallet.multiversx.com/favicon-32x32.png">
-        <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui.min.css">
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui-bundle.min.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui-standalone-preset.min.js"></script>
+    # Serve the Swagger UI
+    @app.route('/apidocs/')
+    async def api_docs():
+        swagger_ui_html = '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>ABI2API - MultiversX</title>
+            <link rel="icon" type="image/png" size="32x32" href="https://wallet.multiversx.com/favicon-32x32.png">
+            <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui.min.css">
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui-bundle.min.js"></script>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui-standalone-preset.min.js"></script>
 
-        <style>
-    ''' + CSS + '''
+            <style>
+        ''' + CSS + '''
 
-  </style>
-    </head>
-    <body>
-<div class="topbar"><div class="wrapper"><div class="topbar-wrapper"><center><img src="https://cdn.discordapp.com/attachments/1002615966598967358/1131252032616005812/new_logo.png" height=50% width=50%/></center></div></div></div>
-        <div id="swagger-ui"></div>
-        <script>
-            SwaggerUIBundle({
-                url: window.location.origin + "/" + ''' + f"'{SCADDRESS}.json'," + '''
-                dom_id: '#swagger-ui',
-                deepLinking: true,
-                presets: [
-                    SwaggerUIBundle.presets.apis,
-                    SwaggerUIStandalonePreset
-                ]
-            });
-        </script>
-    </body>
+      </style>
+        </head>
+        <body>
+    <div class="topbar"><div class="wrapper"><div class="topbar-wrapper"><center><img src="https://cdn.discordapp.com/attachments/1002615966598967358/1131252032616005812/new_logo.png" height=50% width=50%/></center></div></div></div>
+            <div id="swagger-ui"></div>
+            <script>
+                SwaggerUIBundle({
+                    url: window.location.origin + "/" + ''' + f"'{SCADDRESS}.json'," + '''
+                    dom_id: '#swagger-ui',
+                    deepLinking: true,
+                    presets: [
+                        SwaggerUIBundle.presets.apis,
+                        SwaggerUIStandalonePreset
+                    ]
+                });
+            </script>
+        </body>
 
-    </html>
-    '''
-    return swagger_ui_html
+        </html>
+        '''
+        return swagger_ui_html
+    # Register the resource classes
+    for endpoint in abi_json['endpoints']:
+        if endpoint["mutability"] == "readonly":
+            schema = ABITypeSchema()
+            endpoint_data = schema.load(endpoint)
+            resource_class = create_endpoint_resource_class(endpoint_data)
+            endpoint_name = endpoint['name']
+
+            # Add the route
+            app.add_url_rule(
+                f"/{endpoint_name}",
+                view_func=resource_class.as_view(endpoint_name),
+                methods=['GET']
+            )
+    print(f"Running {abi_path} API instance on http://127.0.0.1:{port}/apidocs/ Smart contract address - {sc_address}")
+    uvicorn.run(app, port=port, host="0.0.0.0")
 
 
 if __name__ == '__main__':
-    uvicorn.run(app, port=PORT, host="0.0.0.0")
+    if isinstance(config.SCADDRESS, str):
+        run_api()
+    elif isinstance(config.SCADDRESS, list):
+        processes = []
+        for process in config.SCADDRESS:
+            p = multiprocessing.Process(target=run_api, args=(process["SCADDRESS"], process["ABI_PATH"], process["PORT"]))
+            processes.append(p)
+            p.start()
+        for p in processes:
+            p.join()
+    else:
+        print("Something went horribly wrong. Initiating self destruction protocol!")
