@@ -326,7 +326,7 @@ def generate_custom_swagger_json():
     return swagger_json
 
 
-def run_api(sc_address=config.SCADDRESS, abi_path=config.ABI_PATH, port=config.PORT):
+def run_api(sc_address, abi_path, port):
     global abi_json, types, endpoints, SCADDRESS, app
     app = Quart(__name__)
     SCADDRESS = sc_address
@@ -401,7 +401,7 @@ def run_api(sc_address=config.SCADDRESS, abi_path=config.ABI_PATH, port=config.P
 
 if __name__ == '__main__':
     if isinstance(config.SCADDRESS, str):
-        run_api()
+        run_api(sc_address=config.SCADDRESS, abi_path=config.ABI_PATH, port=config.PORT)
     elif isinstance(config.SCADDRESS, list):
         processes = []
         for process in config.SCADDRESS:
