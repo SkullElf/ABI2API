@@ -13,25 +13,28 @@ def int_to_hex(number):
 def convert_args(args):
     args_output = []
     for arg in args:
-        if arg["type"].startswith("variadic<"):
-            arg["type"] = arg["type"].replace("variadic<", "")[:-1]
-        if "<" in arg["type"]:
-            arg["type"] = arg["type"].split("<")[1].replace(">", "")
-        if ',' in arg["value"]:
-            for piece in arg["value"].split(','):
-                if arg["type"] in list(SIZE_PER_TYPE.keys()):
-                    args_output.append(int_to_hex(piece))
-                elif arg["type"] == "Address":
-                    args_output.append(Address.from_bech32(piece).hex())
-                else:
-                    args_output.append(piece.encode('ascii').hex())
-        else:
-            if arg["type"] in list(SIZE_PER_TYPE.keys()):
-                args_output.append(int_to_hex(arg["value"]))
-            elif arg["type"] == "Address":
-                args_output.append(Address.from_bech32(arg["value"]).hex())
+        try:
+            if arg["type"].startswith("variadic<"):
+                arg["type"] = arg["type"].replace("variadic<", "")[:-1]
+            if "<" in arg["type"]:
+                arg["type"] = arg["type"].split("<")[1].replace(">", "")
+            if ',' in arg["value"]:
+                for piece in arg["value"].split(','):
+                    if arg["type"] in list(SIZE_PER_TYPE.keys()):
+                        args_output.append(int_to_hex(piece))
+                    elif arg["type"] == "Address":
+                        args_output.append(Address.from_bech32(piece).hex())
+                    else:
+                        args_output.append(piece.encode('ascii').hex())
             else:
-                args_output.append(arg["value"].encode('ascii').hex())
+                if arg["type"] in list(SIZE_PER_TYPE.keys()):
+                    args_output.append(int_to_hex(arg["value"]))
+                elif arg["type"] == "Address":
+                    args_output.append(Address.from_bech32(arg["value"]).hex())
+                else:
+                    args_output.append(arg["value"].encode('ascii').hex())
+        except:
+            pass
     return args_output
 
 
@@ -49,6 +52,8 @@ async def query_sc(endpoint, sc_address, args=None):
         args = []
     else:
         args = convert_args(args)
+        if isinstance(args, tuple):
+            return args[0], args[1]
     url = f"{PROXY_URL}/vm-values/query"
     body = {
         "scAddress": sc_address,
@@ -56,24 +61,27 @@ async def query_sc(endpoint, sc_address, args=None):
         "value": "0",
         "args": args
     }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=body) as response:
-            try:
-                response_json = await response.json()
-            except:
-                return 500, "Failed to load JSON response from gateway"
-            if response.status != 200:
-                return response.status, response_json["error"]
-            try:
-                if response_json["data"]["data"]["returnCode"] != "ok":
-                    return 400, response_json["data"]["data"]["returnMessage"]
-            except:
-                if response_json['error'] != "":
-                    if response_json == "'executeQuery: executeQuery: execution failed with timeout'":
-                        print(f"Trying again: {response_json['error']}")
-                        await query_sc(endpoint, sc_address, args)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=body) as response:
+                try:
+                    response_json = await response.json()
+                except:
+                    return 500, "Failed to load JSON response from gateway"
+                if response.status != 200:
+                    return response.status, response_json["error"]
+                try:
+                    if response_json["data"]["data"]["returnCode"] != "ok":
+                        return 400, response_json["data"]["data"]["returnMessage"]
+                except:
+                    if response_json['error'] != "":
+                        if response_json == "'executeQuery: executeQuery: execution failed with timeout'":
+                            print(f"Trying again: {response_json['error']}")
+                            await query_sc(endpoint, sc_address, args)
 
-            return response_json["data"]["data"]["returnData"]
+                return response_json["data"]["data"]["returnData"]
+    except:
+        return 500, "Request timed out"
 
 
 async def parse_abi(sc_address, func, endpoints, abi_json, args=None):

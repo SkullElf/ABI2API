@@ -298,9 +298,16 @@ def generate_custom_swagger_json():
 
                 swagger_parameters.append(swagger_parameter)
 
+            # Additional handling for the "docs" field
+            if "docs" in endpoint:
+                description = "\n".join(endpoint["docs"])
+            else:
+                description = f"No documentation available for {endpoint['name']}."
+
             swagger_json['paths'][swagger_path] = {
                 'get': {
                     'summary': endpoint['name'],
+                    'description': description,
                     'parameters': swagger_parameters,
                     'responses': {
                         '200': {
@@ -308,7 +315,8 @@ def generate_custom_swagger_json():
                             'schema': {
                                 'type': 'object',
                                 'properties': {
-                                    output_data.get('name', 'output'): resolve_output_type(output_data.get('type', 'output'))
+                                    output_data.get('name', 'output'): resolve_output_type(
+                                        output_data.get('type', 'output'))
                                     for output_data in endpoint.get('outputs', [])
                                 }
                             }
@@ -353,10 +361,10 @@ async def api_docs():
         <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui.min.css">
         <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui-bundle.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui-standalone-preset.min.js"></script>
-        
+
         <style>
     ''' + CSS + '''
-    
+
   </style>
     </head>
     <body>
@@ -374,7 +382,7 @@ async def api_docs():
             });
         </script>
     </body>
-    
+
     </html>
     '''
     return swagger_ui_html

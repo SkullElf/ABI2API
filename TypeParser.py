@@ -12,6 +12,9 @@ class ABITypeParser:
             for type_name, type_value in types.items():
                 self.types[type_name] = type_value
 
+    def chunks(self, listitems, n):
+        return [listitems[i:i + n] for i in range(0, len(listitems), n)]
+
     def parse_hex_response(self, hex_responses: list, response_type: str) -> Any:
         result = []
         for hex_response in hex_responses:
@@ -19,6 +22,16 @@ class ABITypeParser:
             result.append(parsed_data)
         if len(result) == 1:
             return result[0]
+        if response_type.startswith("variadic<multi<") and ',' in response_type:
+            outputchunkssize = len(response_type.replace("variadic<multi<", "")[:-2].split(','))
+            tempresult = []
+            for i in result:
+                if i is None:
+                    i = (0,)
+                if isinstance(i, tuple):
+                    for j in i:
+                        tempresult.append(j)
+            result = self.chunks(tempresult, outputchunkssize)
         return result
 
     def isBase64(self, sb):
@@ -35,6 +48,8 @@ class ABITypeParser:
             return False
 
     def read_hex(self, data: bytes, object_type: str) -> Tuple[Any, int]:
+        if len(data) == 0:
+            return None, 0
         if object_type.startswith("optional<"):
             subtype = object_type.replace("optional<", "")[:-1]
             return self.read_hex(data, subtype)
@@ -44,7 +59,6 @@ class ABITypeParser:
         elif object_type == "Address":
             return self.read_address_type(data)
         elif object_type.startswith("List<"):
-
             subtype = object_type.replace("List<", "")[:-1]
             return self.read_list_type(data, subtype)
         elif object_type.startswith("vec<") or object_type.startswith("Vec<"):
@@ -72,7 +86,6 @@ class ABITypeParser:
                 offset = 0
                 for field in struct_fields:
                     field_name = field["name"]
-
                     field_type = field["type"]
                     if field_type.startswith("List<"):
                         subtype = field_type.replace("List<", "")[:-1]
@@ -99,7 +112,8 @@ class ABITypeParser:
         offset = 0
         for subtype in subtypes:
             parsed_item, item_length = self.read_hex(data[offset:], subtype)
-            parsed_items.append(parsed_item)
+            if parsed_item is not None:
+                parsed_items.append(parsed_item)
             offset += item_length
         return tuple(parsed_items), offset
 
@@ -108,8 +122,14 @@ class ABITypeParser:
         discriminant_data = data[0]
         discriminant = discriminant_data
         variant = variants[discriminant]
-        item_length = 1
-        return variant["name"], item_length
+        offset = 1
+        if "fields" in variant:
+            result = {}
+            for field in variant["fields"]:
+                result[field["name"]], item_length = self.read_hex(data[offset:], field["type"])
+                offset += item_length
+            return {variant["name"]: result}, offset
+        return variant["name"], offset
 
     def read_primitive_type(self, data: bytes, object_type: str) -> Tuple[Any, int]:
         if object_type == "bytes":
@@ -148,6 +168,8 @@ class ABITypeParser:
         elif object_type == "EgldOrEsdtTokenIdentifier":
             parsed_item, item_length = self.read_egld_or_esdt_token_identifier(data)
         elif object_type in ["BigUint", "BigInt"]:
+            if not data.hex().startswith("0000"):
+                return str(int.from_bytes(data, byteorder="big")), len(data)
             obj_len = int.from_bytes(data[:4], byteorder="big")
             item_length = 4
             parsed_item = str(int.from_bytes(data[item_length:item_length + obj_len], byteorder="big"))
