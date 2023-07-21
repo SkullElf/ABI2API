@@ -17,8 +17,12 @@ class ABITypeParser:
 
     def parse_hex_response(self, hex_responses: list, response_type: str) -> Any:
         result = []
+        originalispremitive = False
+        if response_type in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "TokenIdentifier",
+                             "EgldOrEsdtTokenIdentifier", "BigUint", "BigInt", "bytes", "isize", "usize", "H256"]:
+            originalispremitive = True
         for hex_response in hex_responses:
-            parsed_data, _ = self.read_hex(hex_response, response_type)
+            parsed_data, _ = self.read_hex(hex_response, response_type, originalispremitive)
             result.append(parsed_data)
         if len(result) == 1:
             return result[0]
@@ -47,15 +51,19 @@ class ABITypeParser:
         except Exception:
             return False
 
-    def read_hex(self, data: bytes, object_type: str) -> Tuple[Any, int]:
-        if len(data) == 0:
+    def read_hex(self, data: bytes, object_type: str, originaltypeispremitive=False) -> Tuple[Any, int]:
+        if originaltypeispremitive and len(data) == 0 and object_type in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "BigUint", "BigInt", "isize", "usize"]:
+            if object_type in ["BigUint", "BigInt"]:
+                return "0", 0
+            return 0, 0
+        elif len(data) == 0:
             return None, 0
         if object_type.startswith("optional<"):
             subtype = object_type.replace("optional<", "")[:-1]
             return self.read_hex(data, subtype)
         elif object_type in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "TokenIdentifier",
                              "EgldOrEsdtTokenIdentifier", "BigUint", "BigInt", "bytes", "isize", "usize", "H256"]:
-            return self.read_primitive_type(data, object_type)
+            return self.read_primitive_type(data, object_type, originaltypeispremitive)
         elif object_type == "Address":
             return self.read_address_type(data)
         elif object_type.startswith("List<"):
@@ -131,8 +139,10 @@ class ABITypeParser:
             return {variant["name"]: result}, offset
         return variant["name"], offset
 
-    def read_primitive_type(self, data: bytes, object_type: str) -> Tuple[Any, int]:
+    def read_primitive_type(self, data: bytes, object_type: str, originalispremitive: bool) -> Tuple[Any, int]:
         if object_type == "bytes":
+            if originalispremitive:
+                return data.decode('ascii'), len(data)
             obj_len = int.from_bytes(data[:4], byteorder="big")
             item_length = 4
             parsed_item = data[4:obj_len + 4].decode('ascii')
@@ -164,11 +174,11 @@ class ABITypeParser:
             parsed_item = bool(int.from_bytes(data[:1], byteorder="big"))
             item_length = 1
         elif object_type == "TokenIdentifier":
-            parsed_item, item_length = self.read_token_identifier(data)
+            parsed_item, item_length = self.read_token_identifier(data, originalispremitive)
         elif object_type == "EgldOrEsdtTokenIdentifier":
-            parsed_item, item_length = self.read_egld_or_esdt_token_identifier(data)
+            parsed_item, item_length = self.read_egld_or_esdt_token_identifier(data, originalispremitive)
         elif object_type in ["BigUint", "BigInt"]:
-            if not data.hex().startswith("0000"):
+            if originalispremitive:
                 return str(int.from_bytes(data, byteorder="big")), len(data)
             obj_len = int.from_bytes(data[:4], byteorder="big")
             item_length = 4
@@ -178,8 +188,8 @@ class ABITypeParser:
             raise ValueError(f"Unsupported primitive type: {object_type}")
         return parsed_item, item_length
 
-    def read_token_identifier(self, data: bytes) -> Tuple[str, int]:
-        if not data.hex().startswith("0000"):
+    def read_token_identifier(self, data: bytes, originalispremitive: bool) -> Tuple[str, int]:
+        if originalispremitive:
             return data.decode('ascii'), len(data)
         obj_len = int.from_bytes(data[:4], byteorder="big")
         item_length = 4
@@ -187,8 +197,8 @@ class ABITypeParser:
         item_length += obj_len
         return parsed_item, item_length
 
-    def read_egld_or_esdt_token_identifier(self, data: bytes) -> Tuple[str, int]:
-        if not data.hex().startswith("0000"):
+    def read_egld_or_esdt_token_identifier(self, data: bytes, originalispremitive: bool) -> Tuple[str, int]:
+        if originalispremitive:
             return data.decode('ascii'), len(data)
         obj_len = int.from_bytes(data[:4], byteorder="big")
         item_length = 4
