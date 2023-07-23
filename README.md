@@ -49,8 +49,8 @@ ABIs are a collection of metatada about the contract.
 
 Replace the path of the abi.json file with the ABI of your smart contract.
 
-## Usage
-
+# Usage
+## Setup
 Update the config.py file with your specific configuration settings.
 Place the following in the APIS list of instances:
 1. ABI JSON file path or URL.
@@ -99,8 +99,8 @@ In this example, ABI2API will provide the user with 2 different APIs on:
 
 > TIP: The `NAME` variable is a unique identifier, so make sure it's different in each entry.
 
-## Contributing
+# Contributing
 Contributions are welcome! If you find any issues or have suggestions for improvements, please feel free to open an issue or submit a pull request.
 
-## License
+# License
 This project is licensed under the MIT License. See the LICENSE file for more information.
