@@ -1,21 +1,15 @@
-from quart import Quart, jsonify, request
+from quart import Quart, jsonify, request, Blueprint
 from quart.views import View
 from marshmallow import Schema, fields, EXCLUDE
 import json
 import re
 import uvicorn
 import requests
-import multiprocessing
 from dark_theme_css import CSS
-import config
+from config import APIS, PORT
 from ParseABI import parse_abi
 
-
-app = None
-abi_json = {}
-types = {}
-endpoints = {}
-SCADDRESS = ""
+CONFIG_DICT = {}
 
 
 class ABITypeSchema(Schema):
@@ -45,7 +39,7 @@ def resolve_input_type(input_type):
     return datatypes.get(cleaned_type, "string")
 
 
-def resolve_output_type(output_type):
+def resolve_output_type(name, output_type):
     basic_types = {
         'i8': {'type': 'integer', 'example': 1},
         'i16': {'type': 'integer', 'example': 12},
@@ -69,29 +63,29 @@ def resolve_output_type(output_type):
     conditions = {
         'variadic': lambda subtype: {
             'type': 'array',
-            'items': resolve_output_type(subtype),
-            'example': [resolve_output_type(subtype)['example']]
+            'items': resolve_output_type(name, subtype),
+            'example': [resolve_output_type(name, subtype)['example']]
         },
         'List': lambda subtype: {
             'type': 'array',
-            'items': resolve_output_type(subtype),
-            'example': [resolve_output_type(subtype)['example']]
+            'items': resolve_output_type(name, subtype),
+            'example': [resolve_output_type(name, subtype)['example']]
         },
         'vec': lambda subtype: {
             'type': 'array',
-            'items': resolve_output_type(subtype),
-            'example': [resolve_output_type(subtype)['example']]
+            'items': resolve_output_type(name, subtype),
+            'example': [resolve_output_type(name, subtype)['example']]
         },
         'Option': lambda subtype: {
-            'type': resolve_output_type(subtype)['type'],
+            'type': resolve_output_type(name, subtype)['type'],
             'nullable': True,
-            'example': resolve_output_type(subtype)['example']
+            'example': resolve_output_type(name, subtype)['example']
         },
-        'optional': lambda subtype: resolve_output_type(subtype),
+        'optional': lambda subtype: resolve_output_type(name, subtype),
         'tuple': lambda subtype: {
             'type': 'array',
-            'items': [resolve_output_type(subtype_item) for subtype_item in subtype],
-            'example': [resolve_output_type(subtype_item)['example'] for subtype_item in subtype]
+            'items': [resolve_output_type(name, subtype_item) for subtype_item in subtype],
+            'example': [resolve_output_type(name, subtype_item)['example'] for subtype_item in subtype]
         },
         'enum': lambda subtype: {
             'type': 'string',
@@ -99,8 +93,8 @@ def resolve_output_type(output_type):
         },
         'multi': lambda subtype: {
             'type': 'array',
-            'items': resolve_output_type(subtype),
-            'example': [resolve_output_type(subtype)['example']]
+            'items': resolve_output_type(name, subtype),
+            'example': [resolve_output_type(name, subtype)['example']]
         }
     }
 
@@ -119,7 +113,7 @@ def resolve_output_type(output_type):
         elif output_type in conditions:
             resolved_type = conditions[output_type](output_type)
         else:
-            custom_type = types.get(output_type)
+            custom_type = CONFIG_DICT[name]["types"].get(output_type)
             if custom_type:
                 if custom_type['type'] == 'enum':
                     enum_variants = custom_type['variants']
@@ -128,21 +122,21 @@ def resolve_output_type(output_type):
                 else:
                     fields = custom_type['fields']
                     resolved_fields = {
-                        field['name']: resolve_output_type(field['type'])
+                        field['name']: resolve_output_type(name, field['type'])
                         for field in fields
                     }
                     resolved_type = {
                         'type': 'object',
                         'properties': resolved_fields,
-                        'example': {field['name']: resolve_output_type(field['type'])['example'] for field in fields}
+                        'example': {field['name']: resolve_output_type(name, field['type'])['example'] for field in fields}
                     }
             else:
                 if ',' in output_type and '<' not in output_type and '>' not in output_type:
                     subtypes = [subtype.strip() for subtype in output_type.split(',')]
                     resolved_type = {
                         'type': 'array',
-                        'items': [resolve_output_type(subtype) for subtype in subtypes],
-                        'example': [resolve_output_type(subtype)['example'] for subtype in subtypes]
+                        'items': [resolve_output_type(name, subtype) for subtype in subtypes],
+                        'example': [resolve_output_type(name, subtype)['example'] for subtype in subtypes]
                     }
                 else:
                     resolved_type = {'type': 'Unknown Type: ' + output_type, 'example': 'unknown'}
@@ -182,9 +176,14 @@ def create_endpoint_resource_class(endpoint_data):
 
     class EndpointResource(View):
         async def dispatch_request(self):
+            url_rule = request.url_rule
+            if url_rule:
+                app_name = url_rule.rule.split('/')[1]  # Assuming the app name is the first part of the URL path
+            else:
+                app_name = "Unknown"
             inputs = {}
             args = []
-            scaddress = str(request.args.get("smartcontractaddress", default=SCADDRESS))
+            scaddress = str(request.args.get("smartcontractaddress", default=CONFIG_DICT[app_name]["SCADDRESS"]))
             for input_data in endpoint_data['inputs']:
                 input_name = input_data['name']
                 input_value = str(request.args.get(input_name, default=''))
@@ -209,7 +208,7 @@ def create_endpoint_resource_class(endpoint_data):
                     })
 
             # Process the input and call the smart contract based on the endpoint name
-            output = await parse_abi(scaddress, endpoint_data["name"], endpoints, abi_json, args)
+            output = await parse_abi(scaddress, endpoint_data["name"], CONFIG_DICT[app_name]["endpoints"], CONFIG_DICT[app_name]["abi_json"], args)
             code, output = output
             if code != 200:
                 message = {"error": output}
@@ -223,51 +222,46 @@ def create_endpoint_resource_class(endpoint_data):
     return EndpointResource
 
 
-
-
-def generate_custom_swagger_json():
+def generate_custom_swagger_json(name=""):
+    display_name = name.replace('/', '')
     # Generate the Swagger JSON specification
     swagger_json = {
         'swagger': '2.0',
         'info': {
-            'title': f"ABI2API - API for Smart Contract: {abi_json['name']}",
-            'description': f'## Description\nSwagger API documentation for ABI JSON on the MultiversX Blockchain.\n## Credits\nBuilt by: SkullElf\nFeel free to follow Bobbet on <a href=\"https://twitter.com/BobbetBot\">Twitter</a>\nHuge thanks to everyone who supported and tested this tool, and mainly:\n* XOXNO\'s team\n* uPong (Enzo Foucaud)\n* Martin Wagner - Knights of Cathena \n\n## Details\nThis API instance provides data from a smart contract in the address: <a href=\"https://explorer.multiversx.com/accounts/{SCADDRESS}\">{SCADDRESS}</a>',
+            'title': f"ABI2API - API for Smart Contract: {CONFIG_DICT[display_name]['abi_json']['name']}",
+            'description': f'## Description\nSwagger API documentation for ABI JSON on the MultiversX Blockchain.\n## Credits\nBuilt by: SkullElf\nFeel free to follow Bobbet on <a href=\"https://twitter.com/BobbetBot\">Twitter</a>\nHuge thanks to everyone who supported and tested this tool, and mainly:\n* XOXNO\'s team\n* uPong (Enzo Foucaud)\n* Martin Wagner - Knights of Cathena \n\n## Details\nThis API instance provides data from a smart contract in the address: <a href=\"https://explorer.multiversx.com/accounts/{CONFIG_DICT[display_name]["SCADDRESS"]}\">{CONFIG_DICT[display_name]["SCADDRESS"]}</a>',
             'version': '1.0'
         },
         'paths': {},
         'definitions': {},
         'tags': [
             {
-                'name': 'Endpoints',
-                'description': 'Endpoints with `readonly` mutability'
+                'name': name.replace('/', ''),
+                'description': f'Endpoints with `readonly` mutability for smart contract: `{name.replace("/", "")}`'
             }
         ]
     }
 
-    for endpoint in abi_json['endpoints']:
+    for endpoint in CONFIG_DICT[display_name]["endpoints"]:
         if endpoint["mutability"] == "readonly":
             schema = ABITypeSchema()
             endpoint_data = schema.load(endpoint)
-
             # Generate the path for the Swagger JSON specification
-            swagger_path = f"/{endpoint['name']}"
+            swagger_path = f"/{name}{endpoint['name']}"
             swagger_parameters = []
             for input_data in endpoint_data['inputs']:
                 input_name = input_data['name']
                 input_type = input_data['type']
                 is_optional = input_type.startswith("optional")
                 is_multi_arg = input_data.get('multi_arg', False)
-
                 # Determine the data type of the input parameter
                 if input_type.startswith("optional<"):
                     input_type = input_type[9:-1]
-
                 swagger_parameter = {
                     'name': input_name,
                     'in': 'query',
                     'required': not is_optional
                 }
-
                 if is_multi_arg:
                     swagger_parameter['type'] = 'array'
                     swagger_parameter['items'] = {
@@ -277,15 +271,12 @@ def generate_custom_swagger_json():
                     swagger_parameter['type'] = 'integer'
                 else:
                     swagger_parameter['type'] = 'string'
-
                 swagger_parameters.append(swagger_parameter)
-
             # Additional handling for the "docs" field
             if "docs" in endpoint:
                 description = "\n".join(endpoint["docs"])
             else:
                 description = f"No documentation available for {endpoint['name']}."
-
             swagger_json['paths'][swagger_path] = {
                 'get': {
                     'summary': endpoint['name'],
@@ -298,26 +289,25 @@ def generate_custom_swagger_json():
                                 'type': 'object',
                                 'properties': {
                                     output_data.get('name', 'output'): resolve_output_type(
+                                        display_name,
                                         output_data.get('type', 'output'))
                                     for output_data in endpoint.get('outputs', [])
                                 }
                             }
                         }
                     },
-                    'tags': ["Endpoints"]
+                    'tags': [display_name]
                 }
             }
-
             # Generate the definition for the Swagger JSON specification
             swagger_definition = {
                 'type': 'object',
                 'properties': {
-                    output_data.get('name', 'output'): resolve_output_type(output_data.get('type', 'output'))
+                    output_data.get('name', 'output'): resolve_output_type(display_name, output_data.get('type', 'output'))
                     for output_data in endpoint.get('outputs', [])
                 }
             }
             swagger_json['definitions'][f"{endpoint['name']}_response"] = swagger_definition
-
             # Update the Swagger parameter to represent the multi_arg input as an array
             for parameter in swagger_parameters:
                 if parameter['name'] in endpoint_data['inputs']:
@@ -326,10 +316,8 @@ def generate_custom_swagger_json():
     return swagger_json
 
 
-def run_api(sc_address, abi_path, port):
-    global abi_json, types, endpoints, SCADDRESS, app
-    app = Quart(__name__)
-    SCADDRESS = sc_address
+def create_api_blueprint(sc_address, abi_path, name=""):
+    bp = Blueprint(name, __name__)
     # Load ABI JSON from the internet
     if abi_path.startswith("https://") or abi_path.startswith("http://"):
         abi_json = requests.get(abi_path).json()
@@ -339,19 +327,24 @@ def run_api(sc_address, abi_path, port):
             abi_json = json.load(f)
     endpoints = abi_json["endpoints"]
     types = abi_json["types"]
+    CONFIG_DICT[name.replace('/', '')] = {
+        "abi_json": abi_json,
+        "types": types,
+        "endpoints": endpoints,
+        "SCADDRESS": sc_address
+    }
 
-    @app.route(f'/{SCADDRESS}.json')
-    async def swagger():
-        return jsonify(generate_custom_swagger_json())
+    @bp.route(f'/api/{name}swagger.json')
+    async def custom_swagger():
+        return jsonify(generate_custom_swagger_json(name))
 
-    # Serve the Swagger UI
-    @app.route('/apidocs/')
+    @bp.route(f'/{name}')
     async def api_docs():
-        swagger_ui_html = '''
+        swagger_ui_html = f'''
         <!DOCTYPE html>
         <html>
         <head>
-            <title>ABI2API - MultiversX</title>
+            <title>ABI2API - {name.replace('/', '')}</title>
             <link rel="icon" type="image/png" size="32x32" href="https://wallet.multiversx.com/favicon-32x32.png">
             <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui.min.css">
             <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.52.1/swagger-ui-bundle.min.js"></script>
@@ -367,7 +360,7 @@ def run_api(sc_address, abi_path, port):
             <div id="swagger-ui"></div>
             <script>
                 SwaggerUIBundle({
-                    url: window.location.origin + "/" + ''' + f"'{SCADDRESS}.json'," + '''
+                    url: window.location.origin + "/" + ''' + f"'api/{name}swagger.json'," + '''
                     dom_id: '#swagger-ui',
                     deepLinking: true,
                     presets: [
@@ -381,8 +374,9 @@ def run_api(sc_address, abi_path, port):
         </html>
         '''
         return swagger_ui_html
+
     # Register the resource classes
-    for endpoint in abi_json['endpoints']:
+    for endpoint in CONFIG_DICT[name.replace('/', '')]["endpoints"]:
         if endpoint["mutability"] == "readonly":
             schema = ABITypeSchema()
             endpoint_data = schema.load(endpoint)
@@ -390,25 +384,20 @@ def run_api(sc_address, abi_path, port):
             endpoint_name = endpoint['name']
 
             # Add the route
-            app.add_url_rule(
-                f"/{endpoint_name}",
+            bp.add_url_rule(
+                f"/{name}{endpoint_name}",
                 view_func=resource_class.as_view(endpoint_name),
                 methods=['GET']
             )
-    print(f"Running {abi_path} API instance on http://127.0.0.1:{port}/apidocs/ Smart contract address - {sc_address}")
-    uvicorn.run(app, port=port, host="0.0.0.0")
+    return bp
 
 
 if __name__ == '__main__':
-    if isinstance(config.SCADDRESS, str):
-        run_api(sc_address=config.SCADDRESS, abi_path=config.ABI_PATH, port=config.PORT)
-    elif isinstance(config.SCADDRESS, list):
-        processes = []
-        for process in config.SCADDRESS:
-            p = multiprocessing.Process(target=run_api, args=(process["SCADDRESS"], process["ABI_PATH"], process["PORT"]))
-            processes.append(p)
-            p.start()
-        for p in processes:
-            p.join()
+    app = Quart(__name__)
+    for process in APIS:
+        app_name = f"{process['NAME']}/"
+        app.register_blueprint(create_api_blueprint(process["SCADDRESS"], process["ABI_PATH"], app_name))
     else:
-        print("Something went horribly wrong. Initiating self destruction protocol!")
+        print("Something went horribly wrong. Initiating self-destruction protocol!")
+
+    uvicorn.run(app, port=PORT, host="0.0.0.0")
