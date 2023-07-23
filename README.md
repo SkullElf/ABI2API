@@ -55,12 +55,14 @@ Update the config.py file with your specific configuration settings.
 Place the following in the APIS list of instances:
 1. ABI JSON file path or URL.
 2. The corresponding Smart Contract address.
-3. The name for the API (will be used inthe path. See example below).
+3. The name for the API (will be used in the URL. See example below).
 
 And the following in the corresponding variables:
 1. Specify the port in which you want the API to be available (default=80).
 2. Specify the environment in which you'd like to query the smart contracts (default="mainnet")
-   
+
+> TIP: `ABI_PATH` can also be a URL. This way you'll always be up to date with the latest versions!
+
 Start the API server:
 
 ```
@@ -68,7 +70,7 @@ python api.py
 ```
 
 Access the API documentation:
-Open your web browser and visit http://localhost:80/NAME/ to view the Swagger UI documentation for the generated API (NAME being the app name specified in the config).
+Open your web browser and visit http://localhost:80/NAME/ to view the Swagger UI documentation for the generated API (`NAME` being the app name specified in the config).
 
 Make API requests:
 You can now make GET requests to interact with your smart contract functions. Refer to the API documentation for the available endpoints and request formats.
