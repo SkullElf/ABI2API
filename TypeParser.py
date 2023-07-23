@@ -18,7 +18,8 @@ class ABITypeParser:
     def parse_hex_response(self, hex_responses: list, response_type: str) -> Any:
         result = []
         originalispremitive = False
-        if response_type in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "TokenIdentifier",
+
+        if response_type.replace("variadic<", "").replace(">", "") in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "TokenIdentifier",
                              "EgldOrEsdtTokenIdentifier", "BigUint", "BigInt", "bytes", "isize", "usize", "H256"]:
             originalispremitive = True
         for hex_response in hex_responses:
@@ -74,7 +75,7 @@ class ABITypeParser:
             return self.read_list_type(data, subtype)
         elif object_type.startswith("variadic<"):
             subtype = object_type.replace("variadic<", "")[:-1]
-            return self.read_hex(data, subtype)
+            return self.read_hex(data, subtype, originaltypeispremitive)
         elif object_type.startswith("Option<"):
             subtype = object_type.replace("Option<", "")[:-1]
             return self.read_option_type(data, subtype)

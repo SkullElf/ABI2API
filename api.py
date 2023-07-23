@@ -397,7 +397,6 @@ if __name__ == '__main__':
     for process in APIS:
         app_name = f"{process['NAME']}/"
         app.register_blueprint(create_api_blueprint(process["SCADDRESS"], process["ABI_PATH"], app_name))
-    else:
-        print("Something went horribly wrong. Initiating self-destruction protocol!")
+
 
     uvicorn.run(app, port=PORT, host="0.0.0.0")
