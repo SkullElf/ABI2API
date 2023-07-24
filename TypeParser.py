@@ -19,24 +19,35 @@ class ABITypeParser:
         result = []
         originalispremitive = False
 
-        if response_type.replace("variadic<", "").replace(">", "") in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "TokenIdentifier",
-                             "EgldOrEsdtTokenIdentifier", "BigUint", "BigInt", "bytes", "isize", "usize", "H256"]:
+        if response_type.replace("variadic<", "").replace(">", "") in ["u8", "i8", "u16", "i16", "u32", "i32", "u64",
+                                                                       "i64", "bool", "TokenIdentifier",
+                                                                       "EgldOrEsdtTokenIdentifier", "BigUint", "BigInt",
+                                                                       "bytes", "isize", "usize", "H256"]:
             originalispremitive = True
+        if response_type.startswith("variadic<multi<") and ',' in response_type:
+            object_types = response_type.replace("variadic<multi<", "")[:-2].split(',')
+            outputchunkssize = len(object_types)
+            reorganized = self.chunks(hex_responses, outputchunkssize)
+            for chunk in reorganized:
+                output = []
+                for i, item in enumerate(chunk):
+                    originalispremitive = False
+                    if object_types[i] in ["u8", "i8", "u16", "i16", "u32",
+                                           "i32", "u64", "i64", "bool",
+                                           "TokenIdentifier",
+                                           "EgldOrEsdtTokenIdentifier",
+                                           "BigUint", "BigInt", "bytes",
+                                           "isize", "usize", "H256"]:
+                        originalispremitive = True
+                    parsed_data, _ = self.read_hex(item, object_types[i], originalispremitive)
+                    output.append(parsed_data)
+                result.append(tuple(output))
+            return result
         for hex_response in hex_responses:
             parsed_data, _ = self.read_hex(hex_response, response_type, originalispremitive)
             result.append(parsed_data)
         if len(result) == 1:
             return result[0]
-        if response_type.startswith("variadic<multi<") and ',' in response_type:
-            outputchunkssize = len(response_type.replace("variadic<multi<", "")[:-2].split(','))
-            tempresult = []
-            for i in result:
-                if i is None:
-                    i = (0,)
-                if isinstance(i, tuple):
-                    for j in i:
-                        tempresult.append(j)
-            result = self.chunks(tempresult, outputchunkssize)
         return result
 
     def isBase64(self, sb):
@@ -53,7 +64,9 @@ class ABITypeParser:
             return False
 
     def read_hex(self, data: bytes, object_type: str, originaltypeispremitive=False) -> Tuple[Any, int]:
-        if originaltypeispremitive and len(data) == 0 and object_type in ["u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "BigUint", "BigInt", "isize", "usize"]:
+        if originaltypeispremitive and len(data) == 0 and object_type in ["u8", "i8", "u16", "i16", "u32", "i32", "u64",
+                                                                          "i64", "bool", "BigUint", "BigInt", "isize",
+                                                                          "usize"]:
             if object_type in ["BigUint", "BigInt"]:
                 return "0", 0
             return 0, 0
@@ -120,9 +133,12 @@ class ABITypeParser:
         parsed_items = []
         offset = 0
         for subtype in subtypes:
-            parsed_item, item_length = self.read_hex(data[offset:], subtype)
-            if parsed_item is not None:
-                parsed_items.append(parsed_item)
+            if subtype.startswith("List<"):
+                subtype = subtype.replace("List<", "")[:-1]
+                parsed_item, item_length = self.read_sub_list_type(data[offset:], subtype)
+            else:
+                parsed_item, item_length = self.read_hex(data[offset:], subtype)
+            parsed_items.append(parsed_item)
             offset += item_length
         return tuple(parsed_items), offset
 
