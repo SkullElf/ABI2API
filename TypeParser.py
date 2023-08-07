@@ -83,6 +83,8 @@ class ABITypeParser:
         elif object_type.startswith("List<"):
             subtype = object_type.replace("List<", "")[:-1]
             return self.read_list_type(data, subtype)
+        elif object_type.startswith("array") and '<' in object_type:
+            return self.read_array_type(data, object_type)
         elif object_type.startswith("vec<") or object_type.startswith("Vec<"):
             subtype = object_type[4:-1]
             return self.read_list_type(data, subtype)
@@ -109,6 +111,7 @@ class ABITypeParser:
                 for field in struct_fields:
                     field_name = field["name"]
                     field_type = field["type"]
+
                     if field_type.startswith("List<"):
                         subtype = field_type.replace("List<", "")[:-1]
                         parsed_field, field_length = self.read_sub_list_type(data[offset:], subtype)
@@ -247,6 +250,18 @@ class ABITypeParser:
             parsed_list.append(parsed_item)
             offset += item_length
         return parsed_list, offset
+
+    def read_array_type(self, data: bytes, subtype: str) -> Tuple[List[Any], int]:
+        parsed_list = []
+        if subtype.startswith("array") and "<" in subtype:
+            list_length = int(subtype.split('<')[0].replace("array", ""))
+            subtype = subtype.split('<')[1][:-1]
+            offset = 0
+            for list_item in range(list_length):
+                parsed_item, item_length = self.read_hex(data[offset:], subtype)
+                parsed_list.append(parsed_item)
+                offset += item_length
+            return parsed_list, offset
 
     def read_option_type(self, data: bytes, subtype: str) -> Tuple[Optional[Any], int]:
         if len(data) == 0:
